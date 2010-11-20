@@ -104,9 +104,8 @@ else
     echo Script running on `hostname` : `/sbin/ifconfig vboxnet0 | grep "inet addr" | awk '{print $2}' | sed 's/addr\://'` \(VirtualBox\)
 fi
 
-if [ $IN_INSTANCE -eq 1 ] ; then
-   install_package dnsutils
-fi
+# this is needed in each instance, for nslookup, TODO: parsing already is needing this package
+install_package dnsutils
 
 # parse arguments
 for i in $*
@@ -167,7 +166,9 @@ do
             MPI=0
             ;;
         --nfs-server=*)
-            NFS_PUBLIC_SERVER_IP=`echo $i | sed 's/[-a-zA-Z0-9]*=//'`
+            PUBLIC_NFS_SERVER_IP=`echo $i | sed 's/[-a-zA-Z0-9]*=//'`
+            get_hostname_from_ip $PUBLIC_NFS_SERVER_IP
+            PUBLIC_NFS_SERVER_HOSTNAME=$HOSTNAME
             ;;
         *)
             echo "unknown option"
@@ -187,7 +188,7 @@ fi
 cat > keygen_in_instance.sh << EOF
 #!/bin/bash
 #$SUDO -u $OTHERUSER mkdir -p /home/$OTHERUSER/.ssh/
-su -u $OTHERUSER -c 'mkdir -p /home/$OTHERUSER/.ssh/'
+su $OTHERUSER -c 'mkdir -p /home/$OTHERUSER/.ssh/'
 if [ ! -f /home/$OTHERUSER/.ssh/id_rsa ]; then
     #$SUDO -u $OTHERUSER ssh-keygen -t rsa -N "" -f /home/$OTHERUSER/.ssh/id_rsa
     su $OTHERUSER -c 'ssh-keygen -t rsa -N "" -f /home/$OTHERUSER/.ssh/id_rsa'
@@ -208,9 +209,21 @@ fi
 echo ALL_INSTANCES_PUBLIC_IP: $ALL_INSTANCES_PUBLIC_IP
 echo ALL_INSTANCES_PUBLIC_HOSTNAME: $ALL_INSTANCES_PUBLIC_HOSTNAME
 
-
 # BEGIN execution on master #################################################
 if [ $IN_INSTANCE -eq 0 ] ; then
+
+
+    # start NFS server first, TODO this is copy and paste from below
+
+        # make this host known to ~/.ssh/known_hosts on master
+        ssh -i $KEY -o StrictHostKeychecking=no $SUPERUSER@$PUBLIC_NFS_SERVER_IP echo private hostname: '`hostname`'
+
+        # copy main script to instance
+        scp -p -i $KEY start_torque.sh $SUPERUSER@$PUBLIC_NFS_SERVER_IP:~/
+
+        INST_PUBLIC_TORQUE_NODES_IP=`echo $PUBLIC_TORQUE_NODES_IP | sed 's/ /\,/g'`
+        ssh -X -i $KEY $SUPERUSER@$PUBLIC_NFS_SERVER_IP "~/start_torque.sh" -s=\"$PUBLIC_TORQUE_SERVER_IP\" -n=\"$INST_PUBLIC_TORQUE_NODES_IP\" -i -m=$MPI --nfs-server="$PUBLIC_NFS_SERVER_IP"
+
 
     # copy setup-torque-script to instances
     for NODE_IP in `echo $ALL_INSTANCES_PUBLIC_IP`
@@ -228,11 +241,11 @@ if [ $IN_INSTANCE -eq 0 ] ; then
             scp -p -i $KEY compileMPI.sh helloworld.c $SUPERUSER@$NODE_IP:~/
         fi
 
-        # execute main script in instance to setup torque, TODO, this list is acomma separted list, I should improve it
+        # execute main script in instance to setup torque, TODO, this list is a comma separated list, I should improve it
         INST_PUBLIC_TORQUE_NODES_IP=`echo $PUBLIC_TORQUE_NODES_IP | sed 's/ /\,/g'`
-        ssh -X -i $KEY $SUPERUSER@$NODE_IP "~/start_torque.sh" -s=\"$PUBLIC_TORQUE_SERVER_IP\" -n=\"$INST_PUBLIC_TORQUE_NODES_IP\" -i -m=$MPI --nfs-server="$NFS_PUBLIC_SERVER_IP"
-
+        ssh -X -i $KEY $SUPERUSER@$NODE_IP "~/start_torque.sh" -s=\"$PUBLIC_TORQUE_SERVER_IP\" -n=\"$INST_PUBLIC_TORQUE_NODES_IP\" -i -m=$MPI --nfs-server="$PUBLIC_NFS_SERVER_IP"
     done
+
 
     #### The script above added all necessary user to all nodes, now the keys can be distributed
 
@@ -344,6 +357,14 @@ fi
 
 
 
+# get private interface IP and HOSTNAME from NFS server
+get_ip_from_hostname $PUBLIC_NFS_SERVER_HOSTNAME
+PRIVATE_NFS_SERVER_IP=$IP
+get_hostname_from_ip $PRIVATE_NFS_SERVER_IP
+PRIVATE_NFS_SERVER_HOSTNAME=$HOSTNAME
+echo PRIVATE_NFS_SERVER: $PRIVATE_NFS_SERVER_IP $PRIVATE_NFS_SERVER_HOSTNAME
+
+
 # get private interface IP and HOSTNAME from Torque server
 get_ip_from_hostname $PUBLIC_TORQUE_SERVER_HOSTNAME
 PRIVATE_TORQUE_SERVER_IP=$IP
@@ -396,6 +417,8 @@ if [ $INTERFACE == "public" ] ; then
     INSTANCE_HOSTNAME=$PUBLIC_INSTANCE_HOSTNAME
     TORQUE_SERVER_IP=$PUBLIC_TORQUE_SERVER_IP
     TORQUE_SERVER_HOSTNAME=$PUBLIC_TORQUE_SERVER_HOSTNAME
+    NFS_SERVER_IP=$PUBLIC_NFS_SERVER_IP
+    NFS_SERVER_HOSTNAME=$PUBLIC_NFS_SERVER_HOSTNAME
     NODES_IP=$PUBLIC_TORQUE_NODES_IP
     NODES_HOSTNAME=$PUBLIC_TORQUE_NODES_HOSTNAME
     ALL_INSTANCES_IP=$ALL_INSTANCES_PUBLIC_IP
@@ -406,6 +429,8 @@ else
         INSTANCE_HOSTNAME=$PRIVATE_INSTANCE_HOSTNAME
         TORQUE_SERVER_IP=$PRIVATE_TORQUE_SERVER_IP
         TORQUE_SERVER_HOSTNAME=$PRIVATE_TORQUE_SERVER_HOSTNAME
+        NFS_SERVER_IP=$PRIVATE_NFS_SERVER_IP
+        NFS_SERVER_HOSTNAME=$PRIVATE_NFS_SERVER_HOSTNAME
         NODES_IP=$PRIVATE_TORQUE_NODES_IP
         NODES_HOSTNAME=$PRIVATE_TORQUE_NODES_HOSTNAME
         ALL_INSTANCES_IP=$ALL_INSTANCES_PRIVATE_IP
@@ -434,6 +459,13 @@ fi
 # for torque on Ubuntu
 if [ $DISTRIBUTOR == Ubuntu ] ; then
     echo "deb http://us-east-1.ec2.archive.ubuntu.com/ubuntu/ $CODENAME multiverse" | $SUDO tee -a /etc/apt/sources.list
+fi
+
+# for torque on Debian lenny
+if [ $DISTRIBUTOR == Debian ] && [ $CODENAME == lenny ] ; then
+    if ! egrep -q "lenny-backports" /etc/apt/sources.list ; then
+        echo "deb http://backports.debian.org/debian-backports lenny-backports main" | $SUDO tee -a /etc/apt/sources.list
+    fi
 fi
 
 #echo "deb http://ftp.us.debian.org/debian sid main" > /etc/apt/sources.list
@@ -481,7 +513,6 @@ if [ $MPI == 1 ] ; then
     #compile MPI test program
     bash compileMPI.sh
 fi
-exit 0
 
 # make hostnames known to all the TORQUE nodes and server/scheduler
 if [ $OverwriteDNS -eq 1 ] ; then
@@ -547,14 +578,15 @@ fi
 # install torque packages
 if [ $INSTANCE_IP == $TORQUE_SERVER_IP ]; then
     install_package "torque-server torque-scheduler torque-client"
-
-    #NFS
-    #install_package "nfs-kernel-server"
 fi
-
 
 if [[ $NODES_IP ==  *$INSTANCE_IP* ]]; then
     install_package "torque-mom torque-client"
+fi
+
+# install NFS server package
+if [ $INSTANCE_IP == $NFS_SERVER_IP ]; then
+    install_package "nfs-kernel-server"
 fi
 
 
@@ -572,19 +604,30 @@ done
 chmod 755 /tmp/hosts.sh
 
 
+if [[ $NODES_IP == *$INSTANCE_IP* ]] || [ $INSTANCE_IP == $TORQUE_SERVER_IP ] ; then
+    #TORQUE
+    $SUDO rm -f /etc/torque/server_name
+    echo $TORQUE_SERVER_HOSTNAME | $SUDO tee -a /etc/torque/server_name
 
-$SUDO rm -f /etc/torque/server_name
-echo $TORQUE_SERVER_HOSTNAME | $SUDO tee -a /etc/torque/server_name
-
-# if you don't create this file you will get errors like: qsub: Bad UID for job execution MSG=ruserok failed validating guest/guest from domU-12-31-38-04-1D-C5.compute-1.internal
-$SUDO rm -f /etc/hosts.equiv
-$SUDO touch /etc/hosts.equiv
-for NODE_HOSTNAME in `echo $NODES_HOSTNAME`
-do
-    if ! egrep -q "$NODE_HOSTNAME" /etc/hosts.equiv ; then
-        echo -ne "$NODE_HOSTNAME\n" | $SUDO tee -a /etc/hosts.equiv
+    #NFS
+    if ! egrep -q "$PRIVATE_NFS_SERVER_IP" /etc/fstab ; then
+        echo -ne "$PRIVATE_NFS_SERVER_IP:/data  /mnt/data  nfs  defaults  0  0\n" | $SUDO tee -a /etc/fstab
     fi
-done
+    $SUDO mkdir -p /mnt/data
+    $SUDO umount /mnt/data -v
+    $SUDO mount /mnt/data -v
+
+    # if you don't create this file you will get errors like: qsub: Bad UID for job execution MSG=ruserok failed validating guest/guest from domU-12-31-38-04-1D-C5.compute-1.internal
+    $SUDO rm -f /etc/hosts.equiv
+    $SUDO touch /etc/hosts.equiv
+    for NODE_HOSTNAME in `echo $NODES_HOSTNAME`
+    do
+        if ! egrep -q "$NODE_HOSTNAME" /etc/hosts.equiv ; then
+            echo -ne "$NODE_HOSTNAME\n" | $SUDO tee -a /etc/hosts.equiv
+        fi
+    done
+
+fi
 
 ## for TORQUE mom
 if [[ $NODES_IP == *$INSTANCE_IP* ]]; then
@@ -623,16 +666,6 @@ fi
 
 ## for TORQUE server
 if [ $INSTANCE_IP == $TORQUE_SERVER_IP ]; then
-
-    ##NFS server
-    #$SUDO mkdir -p /data
-    #$SUDO rm -f /etc/exports
-    #$SUDO touch /etc/exports
-    #for NODE_HOSTNAME in `echo $NODES_HOSTNAME`
-    #do
-    #    echo -ne "/data $NODE_HOSTNAME(rw,sync,no_subtree_check)\n" | $SUDO tee -a /etc/exports
-    #done
-    #$SUDO exportfs -ar
 
     #TORQUE server
     $SUDO rm -f /var/spool/torque/server_priv/nodes
@@ -680,15 +713,19 @@ if [ $INSTANCE_IP == $TORQUE_SERVER_IP ]; then
     cat /etc/torque/server_name
 fi
 
-
-## for TORQUE worker node
-if [[ $NODES_IP == *$INSTANCE_IP* ]]; then
-    #NFS
-    if ! egrep -q "$NFS_PUBLIC_SERVER_IP" /etc/fstab ; then
-        echo -ne "$NFS_PUBLIC_SERVER_IP:/data  /mnt/data  nfs  defaults  0  0\n" | $SUDO tee -a /etc/fstab
-    fi
-    $SUDO mkdir -p /mnt/data
-    $SUDO mount /mnt/data -v
+# for NFS server
+if [ $INSTANCE_IP == $NFS_SERVER_IP ]; then
+    ##NFS server
+    $SUDO mkdir -p /data
+    $SUDO mkdir -p /data/test
+    $SUDO rm -f /etc/exports
+    $SUDO touch /etc/exports
+    # export to TORQUE head node and all TORQUE worker nodes
+    for NODE_HOSTNAME in `echo $NODES_HOSTNAME`
+    do
+        echo -ne "/data $NODE_HOSTNAME(rw,sync,no_subtree_check)\n" | $SUDO tee -a /etc/exports
+    done
+    $SUDO exportfs -ar
 fi
 
 # END   execution in instance ###############################################
