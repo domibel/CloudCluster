@@ -124,15 +124,15 @@ do
 
             # for now provide only IPs, TODO: is_valid_IP($OPTION_S)
             if [ 1 ] ; then
-                PUBLIC_TORQUE_SERVER_IP=$OPTION_S
-                get_hostname_from_ip $PUBLIC_TORQUE_SERVER_IP
-                PUBLIC_TORQUE_SERVER_HOSTNAME=$HOSTNAME
+                TORQUE_HEAD_NODE_PUBLIC_IP=$OPTION_S
+                get_hostname_from_ip $TORQUE_HEAD_NODE_PUBLIC_IP
+                TORQUE_HEAD_NODE_PUBLIC_HOSTNAME=$HOSTNAME
             else
-                PUBLIC_TORQUE_SERVER_HOSTNAME=$OPTION_S
-                get_ip_from_hostname $PUBLIC_TORQUE_SERVER_HOSTNAME
-                PUBLIC_TORQUE_SERVER_IP=$IP
+                TORQUE_HEAD_NODE_PUBLIC_HOSTNAME=$OPTION_S
+                get_ip_from_hostname $TORQUE_HEAD_NODE_PUBLIC_HOSTNAME
+                TORQUE_HEAD_NODE_PUBLIC_IP=$IP
             fi
-            echo PUBLIC_TORQUE_SERVER: $PUBLIC_TORQUE_SERVER_IP $PUBLIC_TORQUE_SERVER_HOSTNAME
+            echo TORQUE_HEAD_NODE_PUBLIC_INTERFACE: $TORQUE_HEAD_NODE_PUBLIC_IP $TORQUE_HEAD_NODE_PUBLIC_HOSTNAME
             ;;
         -n=*|--torque-nodes=*)
             # remove option from string
@@ -142,21 +142,21 @@ do
             do
                 # for now provide only IPs, TODO: is_valid_IP($OPTION_S)
                 if [ 1 ] ; then
-                    PUBLIC_TORQUE_NODE_IP=$PUBLIC_TORQUE_NODE
-                    get_hostname_from_ip $PUBLIC_TORQUE_NODE_IP
-                    PUBLIC_TORQUE_NODE_HOSTNAME=$HOSTNAME
+                    TORQUE_WORKER_NODE_PUBLIC_IP=$PUBLIC_TORQUE_NODE
+                    get_hostname_from_ip $TORQUE_WORKER_NODE_PUBLIC_IP
+                    TORQUE_WORKER_NODE_PUBLIC_HOSTNAME=$HOSTNAME
                 else
-                    PUBLIC_TORQUE_NODE_HOSTNAME=$PUBLIC_TORQUE_NODE
-                    get_ip_from_hostname $PUBLIC_TORQUE_NODE_HOSTNAME
-                    PUBLIC_TORQUE_NODE_IP=$IP
+                    TORQUE_WORKER_NODE_PUBLIC_HOSTNAME=$PUBLIC_TORQUE_NODE
+                    get_ip_from_hostname $TORQUE_WORKER_NODE_PUBLIC_HOSTNAME
+                    TORQUE_WORKER_NODE_PUBLIC_IP=$IP
                 fi
-                echo PUBLIC_TORQUE_NODE_IP: $PUBLIC_TORQUE_NODE_IP
-                echo PUBLIC_TORQUE_NODE_HOSTNAME: $PUBLIC_TORQUE_NODE_HOSTNAME
-                PUBLIC_TORQUE_NODES_IP="$PUBLIC_TORQUE_NODES_IP $PUBLIC_TORQUE_NODE_IP"
-                PUBLIC_TORQUE_NODES_HOSTNAME="$PUBLIC_TORQUE_NODES_HOSTNAME $PUBLIC_TORQUE_NODE_HOSTNAME"
+                echo TORQUE_WORKER_NODE_PUBLIC_IP: $TORQUE_WORKER_NODE_PUBLIC_IP
+                echo TORQUE_WORKER_NODE_PUBLIC_HOSTNAME: $TORQUE_WORKER_NODE_PUBLIC_HOSTNAME
+                TORQUE_WORKER_NODES_PUBLIC_IP="$TORQUE_WORKER_NODES_PUBLIC_IP $TORQUE_WORKER_NODE_PUBLIC_IP"
+                TORQUE_WORKER_NODES_PUBLIC_HOSTNAME="$TORQUE_WORKER_NODES_PUBLIC_HOSTNAME $TORQUE_WORKER_NODE_PUBLIC_HOSTNAME"
             done
-            echo PUBLIC_TORQUE_NODES_IP: $PUBLIC_TORQUE_NODES_IP
-            echo PUBLIC_TORQUE_NODES_HOSTNAME: $PUBLIC_TORQUE_NODES_HOSTNAME
+            echo TORQUE_WORKER_NODES_PUBLIC_IP: $TORQUE_WORKER_NODES_PUBLIC_IP
+            echo TORQUE_WORKER_NODES_PUBLIC_HOSTNAME: $TORQUE_WORKER_NODES_PUBLIC_HOSTNAME
             ;;
         -k=*|--key=*)
             # remove option from string
@@ -173,9 +173,9 @@ do
             MPI=0
             ;;
         --nfs-server=*)
-            PUBLIC_NFS_SERVER_IP=`echo $i | sed 's/[-a-zA-Z0-9]*=//'`
-            get_hostname_from_ip $PUBLIC_NFS_SERVER_IP
-            PUBLIC_NFS_SERVER_HOSTNAME=$HOSTNAME
+            NFS_SERVER_PUBLIC_IP=`echo $i | sed 's/[-a-zA-Z0-9]*=//'`
+            get_hostname_from_ip $NFS_SERVER_PUBLIC_IP
+            NFS_SERVER_PUBLIC_HOSTNAME=$HOSTNAME
             ;;
         *)
             echo "unknown option"
@@ -184,7 +184,7 @@ do
 done
 
 
-if [[ -z $PUBLIC_TORQUE_NODES_IP ]] || [[ -z $PUBLIC_TORQUE_SERVER_IP ]]
+if [[ -z $TORQUE_WORKER_NODES_PUBLIC_IP ]] || [[ -z $TORQUE_HEAD_NODE_PUBLIC_IP ]]
 then
     usage
     exit 1
@@ -204,17 +204,17 @@ EOF
 chmod 755 keygen_in_instance.sh
 
 
-# join server and nodes
-if [[ $PUBLIC_TORQUE_NODES_IP == *$PUBLIC_TORQUE_SERVER_IP* ]]
+# join torque head node and torque worker nodes
+if [[ $TORQUE_WORKER_NODES_PUBLIC_IP == *$TORQUE_HEAD_NODE_PUBLIC_IP* ]]
 then
-    ALL_INSTANCES_PUBLIC_IP="$PUBLIC_TORQUE_NODES_IP"
-    ALL_INSTANCES_PUBLIC_HOSTNAME="$PUBLIC_TORQUE_NODES_HOSTNAME"
+    TORQUE_NODES_PUBLIC_IP="$TORQUE_WORKER_NODES_PUBLIC_IP"
+    TORQUE_NODES_PUBLIC_HOSTNAME="$TORQUE_WORKER_NODES_PUBLIC_HOSTNAME"
 else
-    ALL_INSTANCES_PUBLIC_IP="$PUBLIC_TORQUE_SERVER_IP $PUBLIC_TORQUE_NODES_IP"
-    ALL_INSTANCES_PUBLIC_HOSTNAME="$PUBLIC_TORQUE_SERVER_HOSTNAME $PUBLIC_TORQUE_NODES_HOSTNAME"
+    TORQUE_NODES_PUBLIC_IP="$TORQUE_HEAD_NODE_PUBLIC_IP $TORQUE_WORKER_NODES_PUBLIC_IP"
+    TORQUE_NODES_PUBLIC_HOSTNAME="$TORQUE_HEAD_NODE_PUBLIC_HOSTNAME $TORQUE_WORKER_NODES_PUBLIC_HOSTNAME"
 fi
-echo ALL_INSTANCES_PUBLIC_IP: $ALL_INSTANCES_PUBLIC_IP
-echo ALL_INSTANCES_PUBLIC_HOSTNAME: $ALL_INSTANCES_PUBLIC_HOSTNAME
+echo TORQUE_NODES_PUBLIC_IP: $TORQUE_NODES_PUBLIC_IP
+echo TORQUE_NODES_PUBLIC_HOSTNAME: $TORQUE_NODES_PUBLIC_HOSTNAME
 
 # BEGIN execution on master #################################################
 if [ $IN_INSTANCE -eq 0 ] ; then
@@ -223,70 +223,70 @@ if [ $IN_INSTANCE -eq 0 ] ; then
     # start NFS server first, TODO this is copy and paste from below
 
         # make this host known to ~/.ssh/known_hosts on master
-        ssh -i $KEY -o StrictHostKeychecking=no $SUPERUSER@$PUBLIC_NFS_SERVER_IP echo private hostname: '`hostname`'
+        ssh -i $KEY -o StrictHostKeychecking=no $SUPERUSER@$NFS_SERVER_PUBLIC_IP echo private hostname: '`hostname`'
 
         # copy main script to instance
-        scp -p -i $KEY start_torque.sh $SUPERUSER@$PUBLIC_NFS_SERVER_IP:~/
+        scp -p -i $KEY start_torque.sh $SUPERUSER@$NFS_SERVER_PUBLIC_IP:~/
 
-        INST_PUBLIC_TORQUE_NODES_IP=`echo $PUBLIC_TORQUE_NODES_IP | sed 's/ /\,/g'`
-        ssh -X -i $KEY $SUPERUSER@$PUBLIC_NFS_SERVER_IP "~/start_torque.sh" -s=\"$PUBLIC_TORQUE_SERVER_IP\" -n=\"$INST_PUBLIC_TORQUE_NODES_IP\" -i -m=$MPI --nfs-server="$PUBLIC_NFS_SERVER_IP"
+        INST_TORQUE_WORKER_NODES_PUBLIC_IP=`echo $TORQUE_WORKER_NODES_PUBLIC_IP | sed 's/ /\,/g'`
+        ssh -X -i $KEY $SUPERUSER@$NFS_SERVER_PUBLIC_IP "~/start_torque.sh" -s=\"$TORQUE_HEAD_NODE_PUBLIC_IP\" -n=\"$INST_TORQUE_WORKER_NODES_PUBLIC_IP\" -i -m=$MPI --nfs-server="$NFS_SERVER_PUBLIC_IP"
 
 
     # copy setup-torque-script to instances
-    for NODE_IP in `echo $ALL_INSTANCES_PUBLIC_IP`
+    for TORQUE_NODE_PUBLIC_IP in `echo $TORQUE_NODES_PUBLIC_IP`
     do
-        echo $NODE_IP
+        echo $TORQUE_NODE_PUBLIC_IP
 
         # make this host known to ~/.ssh/known_hosts on master
-        ssh -i $KEY -o StrictHostKeychecking=no $SUPERUSER@$NODE_IP echo private hostname: '`hostname`'
+        ssh -i $KEY -o StrictHostKeychecking=no $SUPERUSER@$TORQUE_NODE_PUBLIC_IP echo private hostname: '`hostname`'
 
         # copy main script to instance
-        scp -p -i $KEY start_torque.sh $SUPERUSER@$NODE_IP:~/
+        scp -p -i $KEY start_torque.sh $SUPERUSER@$TORQUE_NODE_PUBLIC_IP:~/
 
         if [ $MPI == 1 ] ; then
             # copy test mpi script to instance
-            scp -p -i $KEY compileMPI.sh helloworld.c $SUPERUSER@$NODE_IP:~/
+            scp -p -i $KEY compileMPI.sh helloworld.c $SUPERUSER@$TORQUE_NODE_PUBLIC_IP:~/
         fi
 
         # execute main script in instance to setup torque, TODO, this list is a comma separated list, I should improve it
-        INST_PUBLIC_TORQUE_NODES_IP=`echo $PUBLIC_TORQUE_NODES_IP | sed 's/ /\,/g'`
-        ssh -X -i $KEY $SUPERUSER@$NODE_IP "~/start_torque.sh" -s=\"$PUBLIC_TORQUE_SERVER_IP\" -n=\"$INST_PUBLIC_TORQUE_NODES_IP\" -i -m=$MPI --nfs-server="$PUBLIC_NFS_SERVER_IP"
+        INST_TORQUE_WORKER_NODES_PUBLIC_IP=`echo $TORQUE_WORKER_NODES_PUBLIC_IP | sed 's/ /\,/g'`
+        ssh -X -i $KEY $SUPERUSER@$TORQUE_NODE_PUBLIC_IP "~/start_torque.sh" -s=\"$TORQUE_HEAD_NODE_PUBLIC_IP\" -n=\"$INST_TORQUE_WORKER_NODES_PUBLIC_IP\" -i -m=$MPI --nfs-server="$NFS_SERVER_PUBLIC_IP"
     done
 
 
     #### The script above added all necessary user to all nodes, now the keys can be distributed
 
     # TODO, copying the script is probably not necessary, each instance can generate it themself
-    for NODE_IP in `echo $ALL_INSTANCES_PUBLIC_IP`
+    for TORQUE_NODE_PUBLIC_IP in `echo $TORQUE_NODES_PUBLIC_IP`
     do
         # copy keygen_in_instance script to instance and execute to generate keys in instances - for user $OTHERUSER
 
         # copy to $SUPERUSER, but execute as super user under the name $OTHERUSER
-        scp -p -i $KEY keygen_in_instance.sh $SUPERUSER@$NODE_IP:~/
+        scp -p -i $KEY keygen_in_instance.sh $SUPERUSER@$TORQUE_NODE_PUBLIC_IP:~/
 
         # ececute
-        ssh -X -i $KEY $SUPERUSER@$NODE_IP "bash ~/keygen_in_instance.sh" #TODO
+        ssh -X -i $KEY $SUPERUSER@$TORQUE_NODE_PUBLIC_IP "bash ~/keygen_in_instance.sh" #TODO
     done
 
 
-    for SRC_NODE_IP in `echo $ALL_INSTANCES_PUBLIC_IP`
+    for SRC_TORQUE_NODE_PUBLIC_IP in `echo $TORQUE_NODES_PUBLIC_IP`
     do
         # distribute this key to all other nodes
-        for DST_NODE_IP in `echo $ALL_INSTANCES_PUBLIC_IP`
+        for DST_TORQUE_NODE_PUBLIC_IP in `echo $TORQUE_NODES_PUBLIC_IP`
         do
-            echo $DST_NODE_IP
+            echo $DST_TORQUE_NODE_PUBLIC_IP
 
             # copy from src to dst
-            scp -p -i $KEY $SUPERUSER@$SRC_NODE_IP:/home/$OTHERUSER/.ssh/id_rsa.pub /tmp/id_rsa.pub
+            scp -p -i $KEY $SUPERUSER@$SRC_TORQUE_NODE_PUBLIC_IP:/home/$OTHERUSER/.ssh/id_rsa.pub /tmp/id_rsa.pub
 
             # direct copy from src to dst not possible, why not?
-            scp -p -i $KEY /tmp/id_rsa.pub $SUPERUSER@$DST_NODE_IP:/tmp/id_rsa.pub
+            scp -p -i $KEY /tmp/id_rsa.pub $SUPERUSER@$DST_TORQUE_NODE_PUBLIC_IP:/tmp/id_rsa.pub
 
-            ssh -X -i $KEY $SUPERUSER@$DST_NODE_IP "cat /tmp/id_rsa.pub | $SUDO tee -a /home/$OTHERUSER/.ssh/authorized_keys"
+            ssh -X -i $KEY $SUPERUSER@$DST_TORQUE_NODE_PUBLIC_IP "cat /tmp/id_rsa.pub | $SUDO tee -a /home/$OTHERUSER/.ssh/authorized_keys"
 
         done
         #execute, connect to other server generate entry in known_hosts of $OTHERUSER
-        ssh -X -i $KEY $SUPERUSER@$SRC_NODE_IP /tmp/hosts.sh
+        ssh -X -i $KEY $SUPERUSER@$SRC_TORQUE_NODE_PUBLIC_IP /tmp/hosts.sh
     done
 
 
@@ -348,97 +348,97 @@ echo $DISTRIBUTOR $CODENAME
 
 # for Eucalyptus if hostnames are not set properly
 if [ $OverwriteDNS -eq 1 ] ; then
-    PUBLIC_TORQUE_SERVER_HOSTNAME=ip-`echo $PUBLIC_TORQUE_SERVER_IP | sed 's/\./-/g'`
-    echo $PUBLIC_TORQUE_SERVER_IP $PUBLIC_TORQUE_SERVER_HOSTNAME
+    TORQUE_HEAD_NODE_PUBLIC_HOSTNAME=ip-`echo $TORQUE_HEAD_NODE_PUBLIC_IP | sed 's/\./-/g'`
+    echo $TORQUE_HEAD_NODE_PUBLIC_IP $TORQUE_HEAD_NODE_PUBLIC_HOSTNAME
 
-    PRIVATE_TORQUE_SERVER_HOSTNAME=ip-`echo $PRIVATE_TORQUE_SERVER_IP | sed 's/\./-/g'`
-    echo $PRIVATE_TORQUE_SERVER_IP $PRIVATE_TORQUE_SERVER_HOSTNAME
+    TORQUE_HEAD_NODE_PRIVATE_HOSTNAME=ip-`echo $TORQUE_HEAD_NODE_PRIVATE_IP | sed 's/\./-/g'`
+    echo $TORQUE_HEAD_NODE_PRIVATE_IP $TORQUE_HEAD_NODE_PRIVATE_HOSTNAME
 
-    PUBLIC_INSTANCE_IP=`/sbin/ifconfig eth0 | grep "inet addr" | awk '{print $2}' | sed 's/addr\://'`
-    PUBLIC_INSTANCE_HOSTNAME=ip-`echo $PUBLIC_INSTANCE_IP | sed 's/\./-/g'`
-    PRIVATE_INSTANCE_HOSTNAME=ip-`echo $PRIVATE_INSTANCE_IP | sed 's/\./-/g'`
+    INSTANCE_PUBLIC_IP=`/sbin/ifconfig eth0 | grep "inet addr" | awk '{print $2}' | sed 's/addr\://'`
+    INSTANCE_PUBLIC_HOSTNAME=ip-`echo $INSTANCE_PUBLIC_IP | sed 's/\./-/g'`
+    INSTANCE_PRIVATE_HOSTNAME=ip-`echo $INSTANCE_PRIVATE_IP | sed 's/\./-/g'`
 fi
 
 
 
 # get private interface IP and HOSTNAME from NFS server
-get_ip_from_hostname $PUBLIC_NFS_SERVER_HOSTNAME
-PRIVATE_NFS_SERVER_IP=$IP
-get_hostname_from_ip $PRIVATE_NFS_SERVER_IP
-PRIVATE_NFS_SERVER_HOSTNAME=$HOSTNAME
-echo PRIVATE_NFS_SERVER: $PRIVATE_NFS_SERVER_IP $PRIVATE_NFS_SERVER_HOSTNAME
+get_ip_from_hostname $NFS_SERVER_PUBLIC_HOSTNAME
+NFS_SERVER_PRIVATE_IP=$IP
+get_hostname_from_ip $NFS_SERVER_PRIVATE_IP
+NFS_SERVER_PRIVATE_HOSTNAME=$HOSTNAME
+echo NFS_SERVER_PRIVATE_INTERFACE: $NFS_SERVER_PRIVATE_IP $NFS_SERVER_PRIVATE_HOSTNAME
 
 
 # get private interface IP and HOSTNAME from Torque server
-get_ip_from_hostname $PUBLIC_TORQUE_SERVER_HOSTNAME
-PRIVATE_TORQUE_SERVER_IP=$IP
-get_hostname_from_ip $PRIVATE_TORQUE_SERVER_IP
-PRIVATE_TORQUE_SERVER_HOSTNAME=$HOSTNAME
-echo PRIVATE_TORQUE_SERVER: $PRIVATE_TORQUE_SERVER_IP $PRIVATE_TORQUE_SERVER_HOSTNAME
+get_ip_from_hostname $TORQUE_HEAD_NODE_PUBLIC_HOSTNAME
+TORQUE_HEAD_NODE_PRIVATE_IP=$IP
+get_hostname_from_ip $TORQUE_HEAD_NODE_PRIVATE_IP
+TORQUE_HEAD_NODE_PRIVATE_HOSTNAME=$HOSTNAME
+echo TORQUE_HEAD_NODE_PRIVATE_INTERFACE: $TORQUE_HEAD_NODE_PRIVATE_IP $TORQUE_HEAD_NODE_PRIVATE_HOSTNAME
 
 # get private interface IPs and HOSTNAMEs from Nodes
-for PUBLIC_TORQUE_NODE_HOSTNAME in `echo $PUBLIC_TORQUE_NODES_HOSTNAME`
+for TORQUE_WORKER_NODE_PUBLIC_HOSTNAME in `echo $TORQUE_WORKER_NODES_PUBLIC_HOSTNAME`
 do
-    get_ip_from_hostname $PUBLIC_TORQUE_NODE_HOSTNAME
-    PRIVATE_TORQUE_NODE_IP=$IP
-    get_hostname_from_ip $PRIVATE_TORQUE_NODE_IP
-    PRIVATE_TORQUE_NODE_HOSTNAME=$HOSTNAME
-    echo PRIVATE_TORQUE_NODES: $PRIVATE_TORQUE_NODE_IP $PRIVATE_TORQUE_NODE_HOSTNAME
+    get_ip_from_hostname $TORQUE_WORKER_NODE_PUBLIC_HOSTNAME
+    TORQUE_WORKER_NODE_PRIVATE_IP=$IP
+    get_hostname_from_ip $TORQUE_WORKER_NODE_PRIVATE_IP
+    TORQUE_WORKER_NODE_PRIVATE_HOSTNAME=$HOSTNAME
+    echo TORQUE_WORKER_NODE_PRIVATE_INTERFACE: $TORQUE_WORKER_NODE_PRIVATE_IP $TORQUE_WORKER_NODE_PRIVATE_HOSTNAME
 
     # add to list
-    PRIVATE_TORQUE_NODES_IP="$PRIVATE_TORQUE_NODES_IP $PRIVATE_TORQUE_NODE_IP"
-    PRIVATE_TORQUE_NODES_HOSTNAME="$PRIVATE_TORQUE_NODES_HOSTNAME $PRIVATE_TORQUE_NODE_HOSTNAME"
+    TORQUE_WORKER_NODES_PRIVATE_IP="$TORQUE_WORKER_NODES_PRIVATE_IP $TORQUE_WORKER_NODE_PRIVATE_IP"
+    TORQUE_WORKER_NODES_PRIVATE_HOSTNAME="$TORQUE_WORKER_NODES_PRIVATE_HOSTNAME $TORQUE_WORKER_NODE_PRIVATE_HOSTNAME"
 done
-echo PRIVATE_TORQUE_NODES: $PRIVATE_TORQUE_NODES_IP $PRIVATE_TORQUE_NODES_HOSTNAME
+echo TORQUE_WORKER_NODES: $TORQUE_WORKER_NODES_PRIVATE_IP $TORQUE_WORKER_NODES_PRIVATE_HOSTNAME
 
 # join server and nodes
-if [[ $PRIVATE_TORQUE_NODES_IP == *$PRIVATE_TORQUE_SERVER_IP* ]]
+if [[ $TORQUE_WORKER_NODES_PRIVATE_IP == *$TORQUE_HEAD_NODE_PRIVATE_IP* ]]
 then
-    ALL_INSTANCES_PRIVATE_IP="$PRIVATE_TORQUE_NODES_IP"
-    ALL_INSTANCES_PRIVATE_HOSTNAME="$PRIVATE_TORQUE_NODES_HOSTNAME"
+    TORQUE_NODES_PRIVATE_IP="$TORQUE_WORKER_NODES_PRIVATE_IP"
+    TORQUE_NODES_PRIVATE_HOSTNAME="$TORQUE_WORKER_NODES_PRIVATE_HOSTNAME"
 else
-    ALL_INSTANCES_PRIVATE_IP="$PRIVATE_TORQUE_SERVER_IP $PRIVATE_TORQUE_NODES_IP"
-    ALL_INSTANCES_PRIVATE_HOSTNAME="$PRIVATE_TORQUE_SERVER_HOSTNAME $PRIVATE_TORQUE_NODES_HOSTNAME"
+    TORQUE_NODES_PRIVATE_IP="$TORQUE_HEAD_NODE_PRIVATE_IP $TORQUE_WORKER_NODES_PRIVATE_IP"
+    TORQUE_NODES_PRIVATE_HOSTNAME="$TORQUE_HEAD_NODE_PRIVATE_HOSTNAME $TORQUE_WORKER_NODES_PRIVATE_HOSTNAME"
 fi
-echo ALL_INSTANCES_PRIVATE_IP: $ALL_INSTANCES_PRIVATE_IP
-echo ALL_INSTANCES_PRIVATE_HOSTNAME: $ALL_INSTANCES_PRIVATE_HOSTNAME
+echo TORQUE_NODES_PRIVATE_IP: $TORQUE_NODES_PRIVATE_IP
+echo TORQUE_NODES_PRIVATE_HOSTNAME: $TORQUE_NODES_PRIVATE_HOSTNAME
 
 
 # get instance information
-PUBLIC_INSTANCE_IP=`curl -s $METADATA_URL/public-ipv4`
-PUBLIC_INSTANCE_HOSTNAME=`curl -s $METADATA_URL/public-hostname`
-echo $PUBLIC_INSTANCE_IP $PUBLIC_INSTANCE_HOSTNAME
+INSTANCE_PUBLIC_IP=`curl -s $METADATA_URL/public-ipv4`
+INSTANCE_PUBLIC_HOSTNAME=`curl -s $METADATA_URL/public-hostname`
+echo $INSTANCE_PUBLIC_IP $INSTANCE_PUBLIC_HOSTNAME
 
-PRIVATE_INSTANCE_IP=`/sbin/ifconfig eth0 | grep "inet addr" | awk '{print $2}' | sed 's/addr\://'`
-get_hostname_from_ip $PRIVATE_TORQUE_SERVER_IP
-PRIVATE_INSTANCE_HOSTNAME=$HOSTNAME
-echo $PRIVATE_INSTANCE_IP $PRIVATE_INSTANCE_HOSTNAME
+INSTANCE_PRIVATE_IP=`/sbin/ifconfig eth0 | grep "inet addr" | awk '{print $2}' | sed 's/addr\://'`
+get_hostname_from_ip $TORQUE_HEAD_NODE_PRIVATE_IP
+INSTANCE_PRIVATE_HOSTNAME=$HOSTNAME
+echo $INSTANCE_PRIVATE_IP $INSTANCE_PRIVATE_HOSTNAME
 
 
 #using PUBLIC or PRIVATE interface
 if [ $INTERFACE == "public" ] ; then
-    INSTANCE_IP=$PUBLIC_INSTANCE_IP
-    INSTANCE_HOSTNAME=$PUBLIC_INSTANCE_HOSTNAME
-    TORQUE_SERVER_IP=$PUBLIC_TORQUE_SERVER_IP
-    TORQUE_SERVER_HOSTNAME=$PUBLIC_TORQUE_SERVER_HOSTNAME
-    NFS_SERVER_IP=$PUBLIC_NFS_SERVER_IP
-    NFS_SERVER_HOSTNAME=$PUBLIC_NFS_SERVER_HOSTNAME
-    NODES_IP=$PUBLIC_TORQUE_NODES_IP
-    NODES_HOSTNAME=$PUBLIC_TORQUE_NODES_HOSTNAME
-    ALL_INSTANCES_IP=$ALL_INSTANCES_PUBLIC_IP
-    ALL_INSTANCES_HOSTNAME=$ALL_INSTANCES_PUBLIC_HOSTNAME
+    INSTANCE_IP=$INSTANCE_PUBLIC_IP
+    INSTANCE_HOSTNAME=$INSTANCE_PUBLIC_HOSTNAME
+    TORQUE_HEAD_NODE_IP=$TORQUE_HEAD_NODE_PUBLIC_IP
+    TORQUE_HEAD_NODE_HOSTNAME=$TORQUE_HEAD_NODE_PUBLIC_HOSTNAME
+    NFS_SERVER_IP=$NFS_SERVER_PUBLIC_IP
+    NFS_SERVER_HOSTNAME=$NFS_SERVER_PUBLIC_HOSTNAME
+    TORQUE_WORKER_NODES_IP=$TORQUE_WORKER_NODES_PUBLIC_IP
+    TORQUE_WORKER_NODES_HOSTNAME=$TORQUE_WORKER_NODES_PUBLIC_HOSTNAME
+    TORQUE_NODES_IP=$TORQUE_NODES_PUBLIC_IP
+    TORQUE_NODES_HOSTNAME=$TORQUE_NODES_PUBLIC_HOSTNAME
 else
     if [ $INTERFACE == "private" ] ; then
-        INSTANCE_IP=$PRIVATE_INSTANCE_IP
-        INSTANCE_HOSTNAME=$PRIVATE_INSTANCE_HOSTNAME
-        TORQUE_SERVER_IP=$PRIVATE_TORQUE_SERVER_IP
-        TORQUE_SERVER_HOSTNAME=$PRIVATE_TORQUE_SERVER_HOSTNAME
-        NFS_SERVER_IP=$PRIVATE_NFS_SERVER_IP
-        NFS_SERVER_HOSTNAME=$PRIVATE_NFS_SERVER_HOSTNAME
-        NODES_IP=$PRIVATE_TORQUE_NODES_IP
-        NODES_HOSTNAME=$PRIVATE_TORQUE_NODES_HOSTNAME
-        ALL_INSTANCES_IP=$ALL_INSTANCES_PRIVATE_IP
-        ALL_INSTANCES_HOSTNAME=$ALL_INSTANCES_PRIVATE_HOSTNAME
+        INSTANCE_IP=$INSTANCE_PRIVATE_IP
+        INSTANCE_HOSTNAME=$INSTANCE_PRIVATE_HOSTNAME
+        TORQUE_HEAD_NODE_IP=$TORQUE_HEAD_NODE_PRIVATE_IP
+        TORQUE_HEAD_NODE_HOSTNAME=$TORQUE_HEAD_NODE_PRIVATE_HOSTNAME
+        NFS_SERVER_IP=$NFS_SERVER_PRIVATE_IP
+        NFS_SERVER_HOSTNAME=$NFS_SERVER_PRIVATE_HOSTNAME
+        TORQUE_WORKER_NODES_IP=$TORQUE_WORKER_NODES_PRIVATE_IP
+        TORQUE_WORKER_NODES_HOSTNAME=$TORQUE_WORKER_NODES_PRIVATE_HOSTNAME
+        TORQUE_NODES_IP=$TORQUE_NODES_PRIVATE_IP
+        TORQUE_NODES_HOSTNAME=$TORQUE_NODES_PRIVATE_HOSTNAME
     else
         echo "please specify private or public interface"
     fi
@@ -517,7 +517,7 @@ fi
 
 # make hostnames known to all the TORQUE nodes and server/scheduler
 if [ $OverwriteDNS -eq 1 ] ; then
-
+    #TODO
     if [ $INTERFACE == "private" ] ; then
         for NODE_IP in `echo $PRIVATE_NODES_IP`
         do
@@ -531,7 +531,7 @@ if [ $OverwriteDNS -eq 1 ] ; then
         for NODE_IP in `echo $PUBLIC_NODES_IP`
         do
             NODE_HOSTNAME=ip-`echo $NODE_IP | sed 's/\./-/g'`
-            if [ $INSTANCE_IP != $TORQUE_SERVER_IP ] || [ $NODE_IP != $TORQUE_SERVER_IP ]; then
+            if [ $INSTANCE_IP != $TORQUE_HEAD_NODE_IP ] || [ $NODE_IP != $TORQUE_HEAD_NODE_IP ]; then
                 if ! egrep -q "$NODE_IP|$NODE_HOSTNAME" /etc/hosts ; then
                     echo "$NODE_IP   $NODE_HOSTNAME" >> /etc/hosts
                 fi
@@ -540,16 +540,16 @@ if [ $OverwriteDNS -eq 1 ] ; then
     fi
 
     # on TORQUE server
-    if [ $INSTANCE_IP == $TORQUE_SERVER_IP ]; then
+    if [ $INSTANCE_IP == $TORQUE_HEAD_NODE_IP ]; then
         #this one is for the scheduler, if using the public interface
-        if ! egrep -q "127.0.1.1|$PUBLIC_INSTANCE_HOSTNAME" /etc/hosts ; then
-            echo "127.0.1.1 $PUBLIC_INSTANCE_HOSTNAME" >> /etc/hosts
+        if ! egrep -q "127.0.1.1|$INSTANCE_PUBLIC_HOSTNAME" /etc/hosts ; then
+            echo "127.0.1.1 $INSTANCE_PUBLIC_HOSTNAME" >> /etc/hosts
         fi
 
-    #echo "$PRIVATE_INSTANCE_IP $PRIVATE_INSTANCE_HOSTNAME" >> /etc/hosts
+    #echo "$INSTANCE_PRIVATE_IP $INSTANCE_PRIVATE_HOSTNAME" >> /etc/hosts
     else
-        if ! egrep -q "$TORQUE_SERVER_IP|$TORQUE_SERVER_HOSTNAME" /etc/hosts ; then
-            echo "$TORQUE_SERVER_IP $TORQUE_SERVER_HOSTNAME" >> /etc/hosts
+        if ! egrep -q "$TORQUE_HEAD_NODE_IP|$TORQUE_HEAD_NODE_HOSTNAME" /etc/hosts ; then
+            echo "$TORQUE_HEAD_NODE_IP $TORQUE_HEAD_NODE_HOSTNAME" >> /etc/hosts
         fi
     fi
 
@@ -558,7 +558,7 @@ if [ $OverwriteDNS -eq 1 ] ; then
     echo $INSTANCE_HOSTNAME | tee -a /etc/hostname # preserve hostname if rebooting is necessary
     $SUDO hostname $INSTANCE_HOSTNAME # immediately change
     #getent hosts `hostname`
-    #PUBLIC_INSTANCE_HOSTNAME=`curl -s $METADATA_URL/public-hostname`
+    #INSTANCE_PUBLIC_HOSTNAME=`curl -s $METADATA_URL/public-hostname`
 fi
 
 
@@ -566,22 +566,22 @@ if [ $MPI -eq 1 ] ; then
     $SUDO mkdir -p /etc/torque
     $SUDO rm -f /etc/torque/hostfile
     $SUDO touch /etc/torque/hostfile
-    for NODE_HOSTNAME in `echo $NODES_HOSTNAME`
+    for TORQUE_WORKER_NODE_HOSTNAME in `echo $TORQUE_WORKER_NODES_HOSTNAME`
     do
-        if ! egrep -q "$NODE_HOSTNAME" /etc/torque/hostfile ; then
+        if ! egrep -q "$TORQUE_WORKER_NODE_HOSTNAME" /etc/torque/hostfile ; then
             # todo: numer_procs?
-            echo "$NODE_HOSTNAME slots=1" | $SUDO tee -a /etc/torque/hostfile
+            echo "$TORQUE_WORKER_NODE_HOSTNAME slots=1" | $SUDO tee -a /etc/torque/hostfile
         fi
     done
 fi
 
 
 # install torque packages
-if [ $INSTANCE_IP == $TORQUE_SERVER_IP ]; then
+if [ $INSTANCE_IP == $TORQUE_HEAD_NODE_IP ]; then
     install_package "torque-server torque-scheduler torque-client"
 fi
 
-if [[ $NODES_IP ==  *$INSTANCE_IP* ]]; then
+if [[ $TORQUE_WORKER_NODES_IP ==  *$INSTANCE_IP* ]]; then
     install_package "torque-mom torque-client"
 fi
 
@@ -593,14 +593,14 @@ fi
 
 # create script to distribute host keys
 rm -f /tmp/hosts.sh
-for ALL_INSTANCE_IP in `echo $ALL_INSTANCES_IP`
+for TORQUE_NODE_IP in `echo $TORQUE_NODES_IP`
 do
-    echo "($SUDO su - $OTHERUSER -c \"ssh -t -t -o StrictHostKeychecking=no $OTHERUSER@$ALL_INSTANCE_IP echo ''\")& wait" >> /tmp/hosts.sh
+    echo "($SUDO su - $OTHERUSER -c \"ssh -t -t -o StrictHostKeychecking=no $OTHERUSER@$TORQUE_NODE_IP echo ''\")& wait" >> /tmp/hosts.sh
 done
 # torque is communicating via the hostname
-for ALL_INSTANCE_HOSTNAME in `echo $ALL_INSTANCES_HOSTNAME`
+for TORQUE_NODE_HOSTNAME in `echo $TORQUE_NODES_HOSTNAME`
 do
-    echo "($SUDO su - $OTHERUSER -c \"ssh -t -t -o StrictHostKeychecking=no $OTHERUSER@$ALL_INSTANCE_HOSTNAME echo ''\")& wait" >> /tmp/hosts.sh
+    echo "($SUDO su - $OTHERUSER -c \"ssh -t -t -o StrictHostKeychecking=no $OTHERUSER@$TORQUE_NODE_HOSTNAME echo ''\")& wait" >> /tmp/hosts.sh
 done
 chmod 755 /tmp/hosts.sh
 
@@ -612,21 +612,21 @@ if [ $INSTANCE_IP == $NFS_SERVER_IP ]; then
     $SUDO rm -f /etc/exports
     $SUDO touch /etc/exports
     # export to TORQUE head node and all TORQUE worker nodes
-    for ALL_INSTANCE_IP in `echo $ALL_INSTANCES_IP`
+    for TORQUE_NODE_IP in `echo $TORQUE_NODES_IP`
     do
-        echo -ne "/data $ALL_INSTANCE_IP(rw,sync,no_subtree_check)\n" | $SUDO tee -a /etc/exports
+        echo -ne "/data $TORQUE_NODE_IP(rw,sync,no_subtree_check)\n" | $SUDO tee -a /etc/exports
     done
     $SUDO exportfs -ar
 fi
 
-if [[ $NODES_IP == *$INSTANCE_IP* ]] || [ $INSTANCE_IP == $TORQUE_SERVER_IP ] ; then
+if [[ $TORQUE_WORKER_NODES_IP == *$INSTANCE_IP* ]] || [ $INSTANCE_IP == $TORQUE_HEAD_NODE_IP ] ; then
     #TORQUE
     $SUDO rm -f /etc/torque/server_name
-    echo $TORQUE_SERVER_HOSTNAME | $SUDO tee -a /etc/torque/server_name
+    echo $TORQUE_HEAD_NODE_HOSTNAME | $SUDO tee -a /etc/torque/server_name
 
     #NFS
-    if ! egrep -q "$PRIVATE_NFS_SERVER_IP" /etc/fstab ; then
-        echo -ne "$PRIVATE_NFS_SERVER_IP:/data  /mnt/data  nfs  defaults  0  0\n" | $SUDO tee -a /etc/fstab
+    if ! egrep -q "$NFS_SERVER_PRIVATE_IP" /etc/fstab ; then
+        echo -ne "$NFS_SERVER_PRIVATE_IP:/data  /mnt/data  nfs  defaults  0  0\n" | $SUDO tee -a /etc/fstab
     fi
     $SUDO mkdir -p /mnt/data
     echo `$SUDO umount /mnt/data -v`
@@ -635,17 +635,17 @@ if [[ $NODES_IP == *$INSTANCE_IP* ]] || [ $INSTANCE_IP == $TORQUE_SERVER_IP ] ; 
     # if you don't create this file you will get errors like: qsub: Bad UID for job execution MSG=ruserok failed validating guest/guest from domU-12-31-38-04-1D-C5.compute-1.internal
     $SUDO rm -f /etc/hosts.equiv
     $SUDO touch /etc/hosts.equiv
-    for NODE_HOSTNAME in `echo $NODES_HOSTNAME`
+    for TORQUE_WORKER_NODE_HOSTNAME in `echo $TORQUE_WORKER_NODES_HOSTNAME`
     do
-        if ! egrep -q "$NODE_HOSTNAME" /etc/hosts.equiv ; then
-            echo -ne "$NODE_HOSTNAME\n" | $SUDO tee -a /etc/hosts.equiv
+        if ! egrep -q "$TORQUE_WORKER_NODE_HOSTNAME" /etc/hosts.equiv ; then
+            echo -ne "$TORQUE_WORKER_NODE_HOSTNAME\n" | $SUDO tee -a /etc/hosts.equiv
         fi
     done
 
 fi
 
 ## for TORQUE mom
-if [[ $NODES_IP == *$INSTANCE_IP* ]]; then
+if [[ $TORQUE_WORKER_NODES_IP == *$INSTANCE_IP* ]]; then
 
     # kill running process
     if [ ! -z "$(pgrep pbs_mom)" ] ; then
@@ -680,14 +680,14 @@ fi
 
 
 ## for TORQUE server
-if [ $INSTANCE_IP == $TORQUE_SERVER_IP ]; then
+if [ $INSTANCE_IP == $TORQUE_HEAD_NODE_IP ]; then
 
     #TORQUE server
     $SUDO rm -f /var/spool/torque/server_priv/nodes
     $SUDO touch /var/spool/torque/server_priv/nodes
-    for NODE_HOSTNAME in `echo $NODES_HOSTNAME`
+    for TORQUE_WORKER_NODE_HOSTNAME in `echo $TORQUE_WORKER_NODES_HOSTNAME`
     do
-        echo -ne "$NODE_HOSTNAME np=$NUMBER_PROCESSORS\n" | $SUDO tee -a /var/spool/torque/server_priv/nodes
+        echo -ne "$TORQUE_WORKER_NODE_HOSTNAME np=$NUMBER_PROCESSORS\n" | $SUDO tee -a /var/spool/torque/server_priv/nodes
     done
 
     # TODO: workaround for Debian bug #XXXXXX
@@ -715,7 +715,7 @@ if [ $INSTANCE_IP == $TORQUE_SERVER_IP ]; then
     $SUDO qmgr -c "s s default_queue=batch"
     # let all nodes submit jobs, not only the server
     $SUDO qmgr -c "s s allow_node_submit=true"
-    #$SUDO qmgr -c "set server submit_hosts += $TORQUE_SERVER_IP"
+    #$SUDO qmgr -c "set server submit_hosts += $TORQUE_HEAD_NODE_IP"
     #$SUDO qmgr -c "set server submit_hosts += $INSTANCE_IP"
 
     # adding extra nodes
