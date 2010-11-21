@@ -30,15 +30,14 @@ This script starts the torque environment.
 OPTIONS:
 
    -h | --help             Show this message
-   -n | --torque-nodes     nodes              e.g. "192.168.0.14,192.168.0.14"
-   -s | --torque-server    torque server ip   e.g. "192.168.0.13"
+   -n | --torque-nodes     worker nodes ip              e.g. "192.168.0.14,192.168.0.14"
+   -s | --torque-server    torque head node ip          e.g. "192.168.0.13"
    -k | --key              key file
    -v | --verbose          verbose mode
    -m | --with-mpi         with MPI support
         --nfs-server       NFS server
 
-example: start_torque.sh --verbose -s="192.168.0.13" -n="192.168.0.14,192.168.0.17,192.168.0.45" -k="~/.euca/mykey.priv"
-
+example: start_torque.sh --nfs-server="184.72.202.37" -s="184.72.202.37" -n="50.16.45.7,184.72.143.16" -k=/home/user/user.pem
 EOF
 }
 
@@ -191,18 +190,6 @@ then
 fi
 
 
-# generate script
-cat > keygen_in_instance.sh << EOF
-#!/bin/bash
-#$SUDO -u $OTHERUSER mkdir -p /home/$OTHERUSER/.ssh/
-su $OTHERUSER -c 'mkdir -p /home/$OTHERUSER/.ssh/'
-if [ ! -f /home/$OTHERUSER/.ssh/id_rsa ]; then
-    #$SUDO -u $OTHERUSER ssh-keygen -t rsa -N "" -f /home/$OTHERUSER/.ssh/id_rsa
-    su $OTHERUSER -c 'ssh-keygen -t rsa -N "" -f /home/$OTHERUSER/.ssh/id_rsa'
-fi
-EOF
-chmod 755 keygen_in_instance.sh
-
 
 # join torque head node and torque worker nodes
 if [[ $TORQUE_WORKER_NODES_PUBLIC_IP == *$TORQUE_HEAD_NODE_PUBLIC_IP* ]]
@@ -256,15 +243,9 @@ if [ $IN_INSTANCE -eq 0 ] ; then
 
     #### The script above added all necessary user to all nodes, now the keys can be distributed
 
-    # TODO, copying the script is probably not necessary, each instance can generate it themself
     for TORQUE_NODE_PUBLIC_IP in `echo $TORQUE_NODES_PUBLIC_IP`
     do
-        # copy keygen_in_instance script to instance and execute to generate keys in instances - for user $OTHERUSER
-
-        # copy to $SUPERUSER, but execute as super user under the name $OTHERUSER
-        scp -p -i $KEY keygen_in_instance.sh $SUPERUSER@$TORQUE_NODE_PUBLIC_IP:~/
-
-        # ececute
+        # execute to generate keys in instances - for user $OTHERUSER
         ssh -X -i $KEY $SUPERUSER@$TORQUE_NODE_PUBLIC_IP "bash ~/keygen_in_instance.sh" #TODO
     done
 
@@ -309,6 +290,19 @@ fi
 
 echo in instance : `hostname`
 
+# generate script
+cat > keygen_in_instance.sh << EOF
+#!/bin/bash
+#$SUDO -u $OTHERUSER mkdir -p /home/$OTHERUSER/.ssh/
+su $OTHERUSER -c 'mkdir -p /home/$OTHERUSER/.ssh/'
+if [ ! -f /home/$OTHERUSER/.ssh/id_rsa ]; then
+    #$SUDO -u $OTHERUSER ssh-keygen -t rsa -N "" -f /home/$OTHERUSER/.ssh/id_rsa
+    su $OTHERUSER -c 'ssh-keygen -t rsa -N "" -f /home/$OTHERUSER/.ssh/id_rsa'
+fi
+EOF
+chmod 755 keygen_in_instance.sh
+
+
 export DEBIAN_FRONTEND="noninteractive"
 export APT_LISTCHANGES_FRONTEND="none"
 CURL="/usr/bin/curl"
@@ -349,10 +343,10 @@ echo $DISTRIBUTOR $CODENAME
 # for Eucalyptus if hostnames are not set properly
 if [ $OverwriteDNS -eq 1 ] ; then
     TORQUE_HEAD_NODE_PUBLIC_HOSTNAME=ip-`echo $TORQUE_HEAD_NODE_PUBLIC_IP | sed 's/\./-/g'`
-    echo $TORQUE_HEAD_NODE_PUBLIC_IP $TORQUE_HEAD_NODE_PUBLIC_HOSTNAME
+    echo TORQUE_HEAD_NODE_PUBLIC_INTERFACE: $TORQUE_HEAD_NODE_PUBLIC_IP $TORQUE_HEAD_NODE_PUBLIC_HOSTNAME
 
     TORQUE_HEAD_NODE_PRIVATE_HOSTNAME=ip-`echo $TORQUE_HEAD_NODE_PRIVATE_IP | sed 's/\./-/g'`
-    echo $TORQUE_HEAD_NODE_PRIVATE_IP $TORQUE_HEAD_NODE_PRIVATE_HOSTNAME
+    echo TORQUE_HEAD_NODE_PRIVATE_INTERFACE: $TORQUE_HEAD_NODE_PRIVATE_IP $TORQUE_HEAD_NODE_PRIVATE_HOSTNAME
 
     INSTANCE_PUBLIC_IP=`/sbin/ifconfig eth0 | grep "inet addr" | awk '{print $2}' | sed 's/addr\://'`
     INSTANCE_PUBLIC_HOSTNAME=ip-`echo $INSTANCE_PUBLIC_IP | sed 's/\./-/g'`
@@ -389,7 +383,7 @@ do
     TORQUE_WORKER_NODES_PRIVATE_IP="$TORQUE_WORKER_NODES_PRIVATE_IP $TORQUE_WORKER_NODE_PRIVATE_IP"
     TORQUE_WORKER_NODES_PRIVATE_HOSTNAME="$TORQUE_WORKER_NODES_PRIVATE_HOSTNAME $TORQUE_WORKER_NODE_PRIVATE_HOSTNAME"
 done
-echo TORQUE_WORKER_NODES: $TORQUE_WORKER_NODES_PRIVATE_IP $TORQUE_WORKER_NODES_PRIVATE_HOSTNAME
+echo TORQUE_WORKER_NODES_PRIVATE_INTERFACE: $TORQUE_WORKER_NODES_PRIVATE_IP $TORQUE_WORKER_NODES_PRIVATE_HOSTNAME
 
 # join server and nodes
 if [[ $TORQUE_WORKER_NODES_PRIVATE_IP == *$TORQUE_HEAD_NODE_PRIVATE_IP* ]]
@@ -581,7 +575,7 @@ if [ $INSTANCE_IP == $TORQUE_HEAD_NODE_IP ]; then
     install_package "torque-server torque-scheduler torque-client"
 fi
 
-if [[ $TORQUE_WORKER_NODES_IP ==  *$INSTANCE_IP* ]]; then
+if [[ $TORQUE_WORKER_NODES_IP == *$INSTANCE_IP* ]]; then
     install_package "torque-mom torque-client"
 fi
 
@@ -609,6 +603,7 @@ if [ $INSTANCE_IP == $NFS_SERVER_IP ]; then
     ##NFS server
     $SUDO mkdir -p /data
     $SUDO mkdir -p /data/test
+    $SUDO chmod -R 777 /data
     $SUDO rm -f /etc/exports
     $SUDO touch /etc/exports
     # export to TORQUE head node and all TORQUE worker nodes
@@ -619,7 +614,7 @@ if [ $INSTANCE_IP == $NFS_SERVER_IP ]; then
     $SUDO exportfs -ar
 fi
 
-if [[ $TORQUE_WORKER_NODES_IP == *$INSTANCE_IP* ]] || [ $INSTANCE_IP == $TORQUE_HEAD_NODE_IP ] ; then
+if [[ $TORQUE_NODES_IP == *$INSTANCE_IP* ]] ; then
     #TORQUE
     $SUDO rm -f /etc/torque/server_name
     echo $TORQUE_HEAD_NODE_HOSTNAME | $SUDO tee -a /etc/torque/server_name
