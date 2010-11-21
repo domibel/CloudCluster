@@ -57,6 +57,13 @@ function get_ip_from_hostname {
     return 0
 }
 
+function apt_update {
+    $SUDO apt-get -o Dpkg::Options::="--force-confnew" --force-yes -y update
+    if [ $? -ne 0 ] ; then
+        echo "aptitude update failed"
+    fi
+}
+
 function install_package {
     PACKAGE=$1
 
@@ -328,10 +335,7 @@ $SUDO dpkg --configure -a
 
 
 # update package source information
-$SUDO apt-get -o Dpkg::Options::="--force-confnew" --force-yes -y update
-if [ $? -ne 0 ] ; then
-    echo "aptitude update failed"
-fi
+apt_update
 
 # install lsb-release
 install_package lsb-release
@@ -473,10 +477,7 @@ fi
 #echo "deb http://security.debian.org/ squeeze/updates main" >> /etc/apt/sources.list
 
 # update package source information
-$SUDO apt-get -o Dpkg::Options::="--force-confnew" --force-yes -y update
-if [ $? -ne 0 ] ; then
-    echo "aptitude update failed"
-fi
+apt_update
 
 # get rid of some error messages because of missing locales package
 install_package locales
@@ -603,6 +604,20 @@ do
 done
 chmod 755 /tmp/hosts.sh
 
+# for NFS server
+if [ $INSTANCE_IP == $NFS_SERVER_IP ]; then
+    ##NFS server
+    $SUDO mkdir -p /data
+    $SUDO mkdir -p /data/test
+    $SUDO rm -f /etc/exports
+    $SUDO touch /etc/exports
+    # export to TORQUE head node and all TORQUE worker nodes
+    for ALL_INSTANCE_IP in `echo $ALL_INSTANCES_IP`
+    do
+        echo -ne "/data $ALL_INSTANCE_IP(rw,sync,no_subtree_check)\n" | $SUDO tee -a /etc/exports
+    done
+    $SUDO exportfs -ar
+fi
 
 if [[ $NODES_IP == *$INSTANCE_IP* ]] || [ $INSTANCE_IP == $TORQUE_SERVER_IP ] ; then
     #TORQUE
@@ -614,7 +629,7 @@ if [[ $NODES_IP == *$INSTANCE_IP* ]] || [ $INSTANCE_IP == $TORQUE_SERVER_IP ] ; 
         echo -ne "$PRIVATE_NFS_SERVER_IP:/data  /mnt/data  nfs  defaults  0  0\n" | $SUDO tee -a /etc/fstab
     fi
     $SUDO mkdir -p /mnt/data
-    $SUDO umount /mnt/data -v
+    echo `$SUDO umount /mnt/data -v`
     $SUDO mount /mnt/data -v
 
     # if you don't create this file you will get errors like: qsub: Bad UID for job execution MSG=ruserok failed validating guest/guest from domU-12-31-38-04-1D-C5.compute-1.internal
@@ -713,20 +728,6 @@ if [ $INSTANCE_IP == $TORQUE_SERVER_IP ]; then
     cat /etc/torque/server_name
 fi
 
-# for NFS server
-if [ $INSTANCE_IP == $NFS_SERVER_IP ]; then
-    ##NFS server
-    $SUDO mkdir -p /data
-    $SUDO mkdir -p /data/test
-    $SUDO rm -f /etc/exports
-    $SUDO touch /etc/exports
-    # export to TORQUE head node and all TORQUE worker nodes
-    for NODE_HOSTNAME in `echo $NODES_HOSTNAME`
-    do
-        echo -ne "/data $NODE_HOSTNAME(rw,sync,no_subtree_check)\n" | $SUDO tee -a /etc/exports
-    done
-    $SUDO exportfs -ar
-fi
 
 # END   execution in instance ###############################################
 exit 0
