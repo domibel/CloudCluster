@@ -103,6 +103,7 @@ UseAmazonEucalyptus=1
 # values are "public" and "private"
 INTERFACE="private"
 
+DEBUG=1
 
 if [ $UseAmazonEucalyptus -eq 1 ]; then
     echo Script running on `hostname` : `/sbin/ifconfig eth0 | grep "inet addr" | awk '{print $2}' | sed 's/addr\://'` \(Amazon/Eucalyptus\)
@@ -110,8 +111,14 @@ else
     echo Script running on `hostname` : `/sbin/ifconfig vboxnet0 | grep "inet addr" | awk '{print $2}' | sed 's/addr\://'` \(VirtualBox\)
 fi
 
-# this is needed in each instance, for nslookup, TODO: parsing already is needing this package
-install_package dnsutils
+
+# if in instance
+kernel=`uname -r`
+if [[ $kernel == *xen* ]]; then
+    apt_update
+    # this is needed in each instance, for nslookup
+    install_package dnsutils
+fi
 
 # parse arguments
 for i in $*
@@ -169,7 +176,7 @@ do
             IN_INSTANCE=1
             ;;
         -m=*|--with-mpi=*)
-            MPI=0
+            MPI=`echo $i | sed 's/[-a-zA-Z0-9]*=//'`
             ;;
         --nfs-server=*)
             NFS_SERVER_PUBLIC_IP=`echo $i | sed 's/[-a-zA-Z0-9]*=//'`
@@ -206,20 +213,24 @@ echo TORQUE_NODES_PUBLIC_HOSTNAME: $TORQUE_NODES_PUBLIC_HOSTNAME
 # BEGIN execution on master #################################################
 if [ $IN_INSTANCE -eq 0 ] ; then
 
-
     # start NFS server first, TODO this is copy and paste from below
 
-        # make this host known to ~/.ssh/known_hosts on master
-        ssh -i $KEY -o StrictHostKeychecking=no $SUPERUSER@$NFS_SERVER_PUBLIC_IP echo private hostname: '`hostname`'
+    # make this host known to ~/.ssh/known_hosts on master
+    ssh -i $KEY -o StrictHostKeychecking=no $SUPERUSER@$NFS_SERVER_PUBLIC_IP echo private hostname: '`hostname`'
 
-        # copy main script to instance
-        scp -p -i $KEY start_torque.sh $SUPERUSER@$NFS_SERVER_PUBLIC_IP:~/
+    # copy main script to instance
+    scp -p -i $KEY start_torque.sh $SUPERUSER@$NFS_SERVER_PUBLIC_IP:~/
 
-        INST_TORQUE_WORKER_NODES_PUBLIC_IP=`echo $TORQUE_WORKER_NODES_PUBLIC_IP | sed 's/ /\,/g'`
-        ssh -X -i $KEY $SUPERUSER@$NFS_SERVER_PUBLIC_IP "~/start_torque.sh" -s=\"$TORQUE_HEAD_NODE_PUBLIC_IP\" -n=\"$INST_TORQUE_WORKER_NODES_PUBLIC_IP\" -i -m=$MPI --nfs-server="$NFS_SERVER_PUBLIC_IP"
+    if [ $MPI == 1 ] ; then
+        # copy test mpi script to instance
+        scp -p -i $KEY compileMPI.sh helloworld.c $SUPERUSER@$NFS_SERVER_PUBLIC_IP:~/
+    fi
+
+    INST_TORQUE_WORKER_NODES_PUBLIC_IP=`echo $TORQUE_WORKER_NODES_PUBLIC_IP | sed 's/ /\,/g'`
+    ssh -X -i $KEY $SUPERUSER@$NFS_SERVER_PUBLIC_IP "~/start_torque.sh" -s=\"$TORQUE_HEAD_NODE_PUBLIC_IP\" -n=\"$INST_TORQUE_WORKER_NODES_PUBLIC_IP\" -i -m=$MPI --nfs-server="$NFS_SERVER_PUBLIC_IP"
 
 
-    # copy setup-torque-script to instances
+    # copy setup-torque-script to TORQUE nodes
     for TORQUE_NODE_PUBLIC_IP in `echo $TORQUE_NODES_PUBLIC_IP`
     do
         echo $TORQUE_NODE_PUBLIC_IP
@@ -323,13 +334,11 @@ export TERM=linux
 
 DATE=`date '+%Y%m%d'`
 NUMBER_PROCESSORS=`cat /proc/cpuinfo | grep processor | wc -l`
+NUMBER_PROCESSORS=2 #TODO
 
 # clean-up
 $SUDO dpkg --configure -a
 
-
-# update package source information
-apt_update
 
 # install lsb-release
 install_package lsb-release
@@ -439,12 +448,6 @@ else
 fi
 
 
-## fix /tmp directory in debian eucalyptus image
-#chmod 777 /tmp
-# using Google's nameserver
-#echo "nameserver 8.8.8.8" >> /etc/resolv.conf
-
-
 ## add user to all nodes
 if id $OTHERUSER > /dev/null 2>&1
 then
@@ -479,35 +482,18 @@ $SUDO rm -f /etc/locale.gen
 echo "en_US.UTF-8 UTF-8" | $SUDO tee -a /etc/locale.gen
 $SUDO locale-gen
 
-# install portmap for NFS
-install_package portmap
-install_package nfs-common
 
-
-# install nmap
-install_package nmap
-nmap localhost -p 1-20000
-
+if [ $DEBUG == 1 ] ; then
+    # install nmap
+    install_package nmap
+    nmap localhost -p 1-20000
+fi
 
 # install ntpdate
 install_package ntpdate
-###ntpdate pool.ntp.org
+###$SUDO ntpdate pool.ntp.org
 $SUDO ntpdate ntp.ubuntu.com
 
-
-# install OpenMPI packages
-#if [ $MPI == 1 ] ; then
-#    install_package "linux-headers-2.6.35-22-virtual"
-#fi
-
-# install OpenMPI packages
-if [ $MPI == 1 ] ; then
-    install_package "libopenmpi-dev"
-    install_package "openmpi-bin"
-
-    #compile MPI test program
-    bash compileMPI.sh
-fi
 
 # make hostnames known to all the TORQUE nodes and server/scheduler
 if [ $OverwriteDNS -eq 1 ] ; then
@@ -556,51 +542,50 @@ if [ $OverwriteDNS -eq 1 ] ; then
 fi
 
 
-if [ $MPI -eq 1 ] ; then
-    $SUDO mkdir -p /etc/torque
-    $SUDO rm -f /etc/torque/hostfile
-    $SUDO touch /etc/torque/hostfile
-    for TORQUE_WORKER_NODE_HOSTNAME in `echo $TORQUE_WORKER_NODES_HOSTNAME`
-    do
-        if ! egrep -q "$TORQUE_WORKER_NODE_HOSTNAME" /etc/torque/hostfile ; then
-            # todo: numer_procs?
-            echo "$TORQUE_WORKER_NODE_HOSTNAME slots=1" | $SUDO tee -a /etc/torque/hostfile
-        fi
-    done
+# on all TORQUE worker nodes
+if [[ $TORQUE_WORKER_NODES_IP == *$INSTANCE_IP* ]] ; then
+
+    # install portmap for NFS
+    install_package portmap
+    install_package nfs-common
+
+    # install OpenMPI packages
+    #if [ $MPI == 1 ] ; then
+    #    install_package "linux-headers-2.6.35-22-virtual"
+    #fi
+
+    # install OpenMPI packages
+    if [ $MPI == 1 ] ; then
+        install_package "libopenmpi-dev"
+        install_package "openmpi-bin"
+
+        #compile MPI test program
+        bash compileMPI.sh
+    fi
 fi
 
 
-# install torque packages
+# on TORQUE head node
 if [ $INSTANCE_IP == $TORQUE_HEAD_NODE_IP ]; then
     install_package "torque-server torque-scheduler torque-client"
 fi
 
+
+# on TORQUE worker node
 if [[ $TORQUE_WORKER_NODES_IP == *$INSTANCE_IP* ]]; then
     install_package "torque-mom torque-client"
 fi
 
-# install NFS server package
+
+# on NFS server
 if [ $INSTANCE_IP == $NFS_SERVER_IP ]; then
     install_package "nfs-kernel-server"
 fi
 
 
-# create script to distribute host keys
-rm -f /tmp/hosts.sh
-for TORQUE_NODE_IP in `echo $TORQUE_NODES_IP`
-do
-    echo "($SUDO su - $OTHERUSER -c \"ssh -t -t -o StrictHostKeychecking=no $OTHERUSER@$TORQUE_NODE_IP echo ''\")& wait" >> /tmp/hosts.sh
-done
-# torque is communicating via the hostname
-for TORQUE_NODE_HOSTNAME in `echo $TORQUE_NODES_HOSTNAME`
-do
-    echo "($SUDO su - $OTHERUSER -c \"ssh -t -t -o StrictHostKeychecking=no $OTHERUSER@$TORQUE_NODE_HOSTNAME echo ''\")& wait" >> /tmp/hosts.sh
-done
-chmod 755 /tmp/hosts.sh
-
-# for NFS server
+# on NFS server
 if [ $INSTANCE_IP == $NFS_SERVER_IP ]; then
-    ##NFS server
+
     $SUDO mkdir -p /data
     $SUDO mkdir -p /data/test
     $SUDO chmod -R 777 /data
@@ -614,7 +599,23 @@ if [ $INSTANCE_IP == $NFS_SERVER_IP ]; then
     $SUDO exportfs -ar
 fi
 
+
+# on all TORQUE nodes (head node + worker nodes)
 if [[ $TORQUE_NODES_IP == *$INSTANCE_IP* ]] ; then
+
+    # create script to distribute host keys
+    rm -f /tmp/hosts.sh
+    for TORQUE_NODE_IP in `echo $TORQUE_NODES_IP`
+    do
+        echo "($SUDO su - $OTHERUSER -c \"ssh -t -t -o StrictHostKeychecking=no $OTHERUSER@$TORQUE_NODE_IP echo ''\")& wait" >> /tmp/hosts.sh
+    done
+    # torque is communicating via the hostname
+    for TORQUE_NODE_HOSTNAME in `echo $TORQUE_NODES_HOSTNAME`
+    do
+        echo "($SUDO su - $OTHERUSER -c \"ssh -t -t -o StrictHostKeychecking=no $OTHERUSER@$TORQUE_NODE_HOSTNAME echo ''\")& wait" >> /tmp/hosts.sh
+    done
+    chmod 755 /tmp/hosts.sh
+
     #TORQUE
     $SUDO rm -f /etc/torque/server_name
     echo $TORQUE_HEAD_NODE_HOSTNAME | $SUDO tee -a /etc/torque/server_name
@@ -624,10 +625,12 @@ if [[ $TORQUE_NODES_IP == *$INSTANCE_IP* ]] ; then
         echo -ne "$NFS_SERVER_PRIVATE_IP:/data  /mnt/data  nfs  defaults  0  0\n" | $SUDO tee -a /etc/fstab
     fi
     $SUDO mkdir -p /mnt/data
+    # umount, ignore return code
     echo `$SUDO umount /mnt/data -v`
     $SUDO mount /mnt/data -v
 
-    # if you don't create this file you will get errors like: qsub: Bad UID for job execution MSG=ruserok failed validating guest/guest from domU-12-31-38-04-1D-C5.compute-1.internal
+    # if you don't create this file you will get errors like:
+    # qsub: Bad UID for job execution MSG=ruserok failed validating guest/guest from domU-12-31-38-04-1D-C5.compute-1.internal
     $SUDO rm -f /etc/hosts.equiv
     $SUDO touch /etc/hosts.equiv
     for TORQUE_WORKER_NODE_HOSTNAME in `echo $TORQUE_WORKER_NODES_HOSTNAME`
@@ -636,11 +639,24 @@ if [[ $TORQUE_NODES_IP == *$INSTANCE_IP* ]] ; then
             echo -ne "$TORQUE_WORKER_NODE_HOSTNAME\n" | $SUDO tee -a /etc/hosts.equiv
         fi
     done
-
 fi
 
-## for TORQUE mom
+
+# on TORQUE worker nodes
 if [[ $TORQUE_WORKER_NODES_IP == *$INSTANCE_IP* ]]; then
+
+    if [ $MPI -eq 1 ] ; then
+        $SUDO mkdir -p /etc/torque
+        $SUDO rm -f /etc/torque/hostfile
+        $SUDO touch /etc/torque/hostfile
+        for TORQUE_WORKER_NODE_HOSTNAME in `echo $TORQUE_WORKER_NODES_HOSTNAME`
+        do
+            if ! egrep -q "$TORQUE_WORKER_NODE_HOSTNAME" /etc/torque/hostfile ; then
+                # todo: numer_procs?
+                echo "$TORQUE_WORKER_NODE_HOSTNAME slots=1" | $SUDO tee -a /etc/torque/hostfile
+            fi
+        done
+    fi
 
     # kill running process
     if [ ! -z "$(pgrep pbs_mom)" ] ; then
@@ -674,7 +690,7 @@ if [[ $TORQUE_WORKER_NODES_IP == *$INSTANCE_IP* ]]; then
 fi
 
 
-## for TORQUE server
+# on TORQUE head node
 if [ $INSTANCE_IP == $TORQUE_HEAD_NODE_IP ]; then
 
     #TORQUE server
