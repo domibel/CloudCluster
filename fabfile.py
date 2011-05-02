@@ -379,35 +379,3 @@ def get_number_procs():
 
 def replace_dots(IP):
    return "ip-" + IP.replace(".","-")
-
-" " "
-example session:
-
-ec2-run-instances -t t1.micro $AMI -n1 -k gsg-keypair
-ec2-describe-instances
-
-user=ubuntu
-nfsnode=184.72.151.50
-headnode=184.72.151.50
-keypath=../id_rsa-gsg-keypair
-#fab -i ${keypath} -H ${user}@${headnode} init_nfs_server <- doesn't work well
-fab -i ${keypath} -H ${user}@${headnode} init_head_node
-
-Use the same node as a worker node instance
-
-workernode=184.72.151.50
-worker_np=1
-fab -i ${keypath} -H ${user}@${workernode} init_worker_node:${headnode},${nfsnode}
-fab -i ${keypath} -H ${user}@${headnode} add_worker_to_head:${workernode},${worker_np}
-
-Start worker node instance and find out the hostname
-
-ec2-run-instances -t t1.micro $AMI -n1 -k gsg-keypair
-ec2-describe-instances
-
-workernode=50.17.107.173
-worker_np=1
-fab -i ${keypath} -H ${user}@${workernode} init_worker_node:${headnode},${nfsnode}
-fab -i ${keypath} -H ${user}@${headnode} add_worker_to_head:${workernode},${worker_np}
-
-" " "
